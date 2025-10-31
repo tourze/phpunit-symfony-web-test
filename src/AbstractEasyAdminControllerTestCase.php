@@ -28,11 +28,6 @@ use Tourze\PHPUnitBase\TestCaseHelper;
 abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
 {
     /**
-     * @var array<string, bool>
-     */
-    private array $actionStatusCache = [];
-
-    /**
      * 读取容器中的真实服务
      */
     abstract protected function getControllerService(): AbstractCrudController;
@@ -154,9 +149,8 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
         // 关闭异常捕获
         $client->catchExceptions(false);
 
-        // 创建管理员用户并登录
-        $this->createAdminUser('admin@test.com', 'password123');
-        $this->loginAsAdmin($client, 'admin@test.com', 'password123');
+        // 直接使用内存管理员用户登录，避免 provider 重载导致的角色丢失
+        $client->loginUser(new \Symfony\Component\Security\Core\User\InMemoryUser('admin', 'password', ['ROLE_ADMIN']), 'main');
 
         return $client;
     }
@@ -201,9 +195,6 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
 
     private function resolveDashboardControllerFqcn(): ?string
     {
-        // 确保 EasyAdmin Dashboard 路由缓存已预热
-        $this->ensureDashboardRoutesCacheWarmed();
-
         /** @var DashboardControllerRegistry $dashboardRegistry */
         $dashboardRegistry = self::getService(DashboardControllerRegistry::class);
 
@@ -226,44 +217,6 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
         }
 
         return null;
-    }
-
-    /**
-     * 确保 EasyAdmin Dashboard 路由缓存已预热
-     *
-     * 在测试环境中，EasyAdmin 的 cache warmer 不会自动执行，
-     * 导致 dashboard 路由映射为空，AdminUrlGenerator 无法正确工作。
-     * 此方法通过检查缓存文件并按需预热来解决这个问题。
-     */
-    private function ensureDashboardRoutesCacheWarmed(): void
-    {
-        static $isWarmed = false;
-
-        if ($isWarmed) {
-            return;
-        }
-
-        try {
-            $kernel = self::getKernel();
-            $cacheDir = $kernel->getCacheDir();
-            $dashboardRoutesFile = $cacheDir . '/easyadmin/routes-dashboard.php';
-
-            // 如果缓存文件不存在，执行预热
-            if (!file_exists($dashboardRoutesFile)) {
-                // 尝试获取 EasyAdmin 的 cache warmer
-                $container = self::getContainer();
-                if ($container->has('easyadmin.cache_warmer')) {
-                    /** @var CacheWarmer $cacheWarmer */
-                    $cacheWarmer = $container->get('easyadmin.cache_warmer');
-                    $cacheWarmer->warmUp($cacheDir, $kernel->getBuildDir() ?? $cacheDir);
-                }
-            }
-
-            $isWarmed = true;
-        } catch (\Throwable $e) {
-            // 静默忽略预热失败，避免影响其他测试
-            // 如果预热失败，测试可能会跳过或使用其他兜底机制
-        }
     }
 
     /**

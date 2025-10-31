@@ -14,10 +14,13 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase as BaseWebTestCase;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
+use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 use Symfony\Component\Dotenv\Dotenv;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Core\User\InMemoryUser;
 use Symfony\Component\Security\Core\User\UserInterface;
 use SymfonyTestingFramework\Kernel;
 use Tourze\BundleDependency\ResolveHelper;
@@ -29,6 +32,7 @@ use Tourze\PHPUnitSymfonyKernelTest\DatabaseHelper;
 use Tourze\PHPUnitSymfonyKernelTest\DoctrineTrait;
 use Tourze\PHPUnitSymfonyKernelTest\EntityManagerHelper;
 use Tourze\PHPUnitSymfonyKernelTest\Exception\DoctrineSupportException;
+use Tourze\PHPUnitSymfonyKernelTest\InMemoryUserManager;
 use Tourze\PHPUnitSymfonyKernelTest\ServiceLocatorTrait;
 use Tourze\PHPUnitSymfonyWebTest\Exception\WebTestClientException;
 use Tourze\UserServiceContracts\UserManagerInterface;
@@ -50,8 +54,9 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     protected function loginAsAdmin(KernelBrowser $client, string $username = 'admin', string $password = 'password'): UserInterface
     {
-        // 回退到内存用户
-        return $this->loginWithMemoryUser($client, $username, ['ROLE_ADMIN']);
+        // 为兼容 testing framework 的内存用户提供者，这里固定使用 `admin`
+        // 避免由于 provider 仅预置了 admin 用户而在请求时被刷新导致权限丢失
+        return $this->loginWithMemoryUser($client, 'admin', ['ROLE_ADMIN']);
     }
 
     /**
@@ -125,7 +130,10 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
         );
 
         // 保存用户
-        $this->persistAndFlush($user);
+        if (!$user instanceof InMemoryUser) {
+            $this->persistAndFlush($user);
+        }
+
         return $user;
     }
 
@@ -177,33 +185,8 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     private function loginWithMemoryUser(KernelBrowser $client, string $username, array $roles): UserInterface
     {
-        // 创建一个简单的内存用户对象
-        $user = new class($username, $roles) implements UserInterface {
-            /**
-             * @param array<string> $roles
-             */
-            public function __construct(private string $username, private array $roles)
-            {
-            }
-
-            /**
-             * @return array<string>
-             */
-            public function getRoles(): array
-            {
-                return $this->roles;
-            }
-
-            public function eraseCredentials(): void
-            {
-            }
-
-            public function getUserIdentifier(): string
-            {
-                return '' !== $this->username ? $this->username : 'unknown';
-            }
-        };
-
+        // 使用框架内置的 InMemoryUser，避免匿名类导致的序列化失败
+        $user = new InMemoryUser('' !== $username ? $username : 'unknown', '', $roles);
         $client->loginUser($user);
 
         return $user;
@@ -312,12 +295,21 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
         $_ENV['DATABASE_URL'] = $_SERVER['DATABASE_URL'] = DatabaseHelper::generateUniqueDatabaseUrl();
         $_ENV['TRUSTED_PROXIES'] = $_SERVER['TRUSTED_PROXIES'] = '0.0.0.0/0';
 
-        return new Kernel(
-            environment: $options['environment'] ?? 'test',
-            debug: $options['debug'] ?? true,
-            projectDir: $projectDir,
-            appendBundles: $bundles,
-        );
+        // 使用匿名类扩展测试 Kernel，在构建容器时补充默认的 UserManagerInterface
+        return new class(environment: $options['environment'] ?? 'test', debug: $options['debug'] ?? true, projectDir: $projectDir, appendBundles: $bundles) extends Kernel {
+            protected function build(ContainerBuilder $container): void
+            {
+                parent::build($container);
+
+                // 如果没有显式提供 UserManagerInterface，则注册一个基于 InMemoryUser 的默认实现
+                $id = UserManagerInterface::class;
+                if (!$container->has($id) && !$container->hasDefinition($id) && !$container->hasAlias($id)) {
+                    $definition = new Definition(InMemoryUserManager::class);
+                    $definition->setPublic(true);
+                    $container->setDefinition($id, $definition);
+                }
+            }
+        };
     }
 
     /**
