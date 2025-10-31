@@ -588,8 +588,6 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      *
      * 子类必须实现此方法以测试不支持的 HTTP 方法，
      * 通常应该期望抛出 MethodNotAllowedHttpException 异常。
-     *
-     * @phpstan-ignore-next-line
      */
     #[Test]
     #[DataProvider('provideNotAllowedMethods')]
