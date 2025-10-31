@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Large;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use PHPUnit\Framework\Attributes\Test;
+use Symfony\Bridge\Doctrine\Security\User\UserLoaderInterface;
 use Symfony\Bundle\FrameworkBundle\FrameworkBundle;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase as BaseWebTestCase;
@@ -301,12 +302,18 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
             {
                 parent::build($container);
 
+                $definition = new Definition(InMemoryUserManager::class);
+                $definition->setPublic(true);
+                $container->setDefinition(InMemoryUserManager::class, $definition);
+
                 // 如果没有显式提供 UserManagerInterface，则注册一个基于 InMemoryUser 的默认实现
                 $id = UserManagerInterface::class;
                 if (!$container->has($id) && !$container->hasDefinition($id) && !$container->hasAlias($id)) {
-                    $definition = new Definition(InMemoryUserManager::class);
-                    $definition->setPublic(true);
-                    $container->setDefinition($id, $definition);
+                    $container->setAlias(UserManagerInterface::class, InMemoryUserManager::class);
+                }
+                $id = UserLoaderInterface::class;
+                if (!$container->has($id) && !$container->hasDefinition($id) && !$container->hasAlias($id)) {
+                    $container->setAlias(UserLoaderInterface::class, InMemoryUserManager::class);
                 }
             }
         };
