@@ -4,9 +4,6 @@ declare(strict_types=1);
 
 namespace Tourze\PHPUnitSymfonyWebTest;
 
-use BizUserBundle\BizUserBundle;
-use BizUserBundle\Entity\BizUser;
-use BizUserBundle\Repository\BizUserRepository;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractCrudController;
 use EasyCorp\Bundle\EasyAdminBundle\Controller\AbstractDashboardController;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -20,11 +17,9 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase as BaseWebTestCase;
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 use Symfony\Component\Dotenv\Dotenv;
 use Symfony\Component\HttpKernel\KernelInterface;
-use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\User\UserInterface;
 use SymfonyTestingFramework\Kernel;
-use Tourze\BizRoleBundle\Repository\BizRoleRepository;
 use Tourze\BundleDependency\ResolveHelper;
 use Tourze\DoctrineResolveTargetEntityBundle\Testing\TestEntityGenerator;
 use Tourze\PHPUnitBase\TestCaseHelper;
@@ -32,8 +27,11 @@ use Tourze\PHPUnitBase\TestHelper;
 use Tourze\PHPUnitSymfonyKernelTest\BundleInferrer;
 use Tourze\PHPUnitSymfonyKernelTest\DatabaseHelper;
 use Tourze\PHPUnitSymfonyKernelTest\DoctrineTrait;
+use Tourze\PHPUnitSymfonyKernelTest\EntityManagerHelper;
+use Tourze\PHPUnitSymfonyKernelTest\Exception\DoctrineSupportException;
 use Tourze\PHPUnitSymfonyKernelTest\ServiceLocatorTrait;
 use Tourze\PHPUnitSymfonyWebTest\Exception\WebTestClientException;
+use Tourze\UserServiceContracts\UserManagerInterface;
 
 /**
  * 增强的 WebTestCase 基类
@@ -52,14 +50,6 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     protected function loginAsAdmin(KernelBrowser $client, string $username = 'admin', string $password = 'password'): UserInterface
     {
-        // 检查是否在测试环境中有BizUser可用
-        if ($this->isBizUserAvailable()) {
-            $user = $this->findOrCreateBizUser($username, $password, ['ROLE_ADMIN']);
-            $client->loginUser($user);
-
-            return $user;
-        }
-
         // 回退到内存用户
         return $this->loginWithMemoryUser($client, $username, ['ROLE_ADMIN']);
     }
@@ -69,7 +59,7 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     protected function loginAsUser(KernelBrowser $client, string $username = 'user', string $password = 'password'): UserInterface
     {
-        $user = $this->findOrCreateBizUser($username, $password, ['ROLE_USER']);
+        $user = $this->findOrCreateUser($username, $password, ['ROLE_USER']);
         $client->loginUser($user);
 
         return $user;
@@ -82,7 +72,7 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     protected function loginWithRoles(KernelBrowser $client, array $roles, string $username = 'test', string $password = 'password'): UserInterface
     {
-        $user = $this->findOrCreateBizUser($username, $password, $roles);
+        $user = $this->findOrCreateUser($username, $password, $roles);
         $client->loginUser($user);
 
         return $user;
@@ -93,83 +83,91 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     protected function createNormalUser(string $username = 'user', string $password = 'password'): UserInterface
     {
-        return $this->findOrCreateBizUser($username, $password, ['ROLE_USER']);
+        return $this->findOrCreateUser($username, $password, ['ROLE_USER']);
     }
 
     /**
-     * 创建普通用户
+     * 创建管理员用户
      */
     protected function createAdminUser(string $username = 'admin', string $password = 'password'): UserInterface
     {
-        return $this->findOrCreateBizUser($username, $password, ['ROLE_ADMIN']);
+        return $this->findOrCreateUser($username, $password, ['ROLE_ADMIN']);
     }
 
     /**
-     * 查找或创建 BizUser 实体
+     * 查找或创建用户实体
      *
      * @param array<string> $roles
      */
-    private function findOrCreateBizUser(string $username, string $password, array $roles): BizUser
+    private function findOrCreateUser(string $username, string $password, array $roles): UserInterface
     {
-        $em = $this->getEntityManager();
-
         // 尝试查找已存在的用户
-        $user = $em->getRepository(BizUser::class)->findOneBy(['username' => $username]);
+        $user = self::getService(UserManagerInterface::class)->loadUserByIdentifier($username);
 
-        if (null === $user) {
-            $user = $this->createBizUser($username, $password, $roles);
+        if (!$user) {
+            $user = $this->createUser($username, $password, $roles);
         }
 
         return $user;
     }
 
     /**
-     * 创建 BizUser 实体
+     * 创建用户实体
      *
      * @param array<string> $roles
      */
-    private function createBizUser(string $username, string $password, array $roles): BizUser
+    final protected function createUser(string $username, string $password, array $roles): UserInterface
     {
-        $user = new BizUser();
-        $user->setUsername($username);
-        $user->setValid(true);
-
-        // 设置密码
-        $passwordHasher = self::getService(UserPasswordHasherInterface::class);
-        $user->setPasswordHash($passwordHasher->hashPassword($user, $password));
-
-        $roleRepository = self::getService(BizRoleRepository::class);
-
-        foreach ($roles as $role) {
-            $user->addAssignRole($roleRepository->findOrCreate($role));
-        }
-
-        // 如果用户名是邮箱格式，也设置邮箱
-        if (false !== filter_var($username, FILTER_VALIDATE_EMAIL)) {
-            $user->setEmail($username);
-        }
+        $user = self::getService(UserManagerInterface::class)->createUser(
+            userIdentifier: $username,
+            password: $password,
+            roles: $roles,
+        );
 
         // 保存用户
-        $userRepository = self::getService(BizUserRepository::class);
-        $userRepository->save($user);
-
+        $this->persistAndFlush($user);
         return $user;
     }
 
     /**
-     * 检查BizUser是否可用
+     * 持久化并刷新实体
+     *
+     * 便捷方法，同时执行 persist 和 flush
+     *
+     * @param bool $refresh 是否刷新实体状态
      */
-    private function isBizUserAvailable(): bool
+    final protected function persistAndFlush(object $entity, bool $refresh = false): object
     {
-        // 检查BizUser类是否存在
-        if (!class_exists(BizUser::class)) {
-            return false;
+        if (!self::hasDoctrineSupport()) {
+            throw DoctrineSupportException::persistNotSupported();
         }
 
-        // 检测是否加载了这个Bundle
-        $bundles = self::getContainer()->getParameter('kernel.bundles');
+        $em = self::getEntityManager();
+        $em->persist($entity);
+        $em->flush();
 
-        return is_array($bundles) && in_array(BizUserBundle::class, $bundles, true);
+        // 记录操作
+        $this->getEntityManagerHelper()->recordOperation();
+
+        if ($refresh) {
+            $em->refresh($entity);
+        }
+
+        return $entity;
+    }
+
+    private ?EntityManagerHelper $entityManagerHelper = null;
+
+    /**
+     * 获取 EntityManager 辅助工具
+     */
+    private function getEntityManagerHelper(): EntityManagerHelper
+    {
+        if (null === $this->entityManagerHelper) {
+            $this->entityManagerHelper = new EntityManagerHelper(self::getEntityManager());
+        }
+
+        return $this->entityManagerHelper;
     }
 
     /**
@@ -284,9 +282,6 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
         if (null !== $bundleClass) {
             $bundles[$bundleClass] = ['all' => true];
         }
-
-        // 为了支持认证测试，自动添加 BizUserBundle
-        $bundles[BizUserBundle::class] = ['all' => true];
 
         // 查找所有关联Bundle，可能使用到的实体
         // 过滤出有效的类字符串
