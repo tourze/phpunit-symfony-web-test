@@ -1,0 +1,43 @@
+{
+  "name": "tourze/phpunit-symfony-web-test",
+  "description": "",
+  "type": "library",
+  "homepage": "https://github.com/tourze/phpunit-symfony-web-test",
+  "license": "MIT",
+  "require": {
+    "composer-runtime-api": "^2.0",
+    "easycorp/easyadmin-bundle": "^4",
+    "symfony/dependency-injection": "^7.3",
+    "symfony/framework-bundle": "^7.3",
+    "symfony/http-foundation": "^7.3",
+    "symfony/http-kernel": "^7.3",
+    "symfony/password-hasher": "^7.3",
+    "symfony/routing": "^7.3",
+    "symfony/security-core": "^7.3",
+    "symfony/yaml": "^7.3",
+    "tourze/biz-user-bundle": "0.0.*",
+    "tourze/bundle-dependency": "1.*",
+    "tourze/doctrine-resolve-target-entity-bundle": "0.0.*",
+    "tourze/symfony-testing-framework": "0.0.*"
+  },
+  "require-dev": {
+    "phpstan/phpstan": "^2.1",
+    "phpunit/phpunit": "^11.5",
+    "tourze/enum-extra": "0.1.*",
+    "tourze/phpunit-base": "1.*",
+    "tourze/phpunit-symfony-kernel-test": "0.0.*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Tourze\\PHPUnitSymfonyWebTest\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Tourze\\PHPUnitSymfonyWebTest\\Tests\\": "tests/"
+    }
+  },
+  "extra": {
+    "release-version": "0.1.*"
+  }
+}
