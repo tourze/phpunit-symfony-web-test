@@ -18,6 +18,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase as BaseWebTestCase;
 use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
+use Symfony\Component\DependencyInjection\Reference;
 use Symfony\Component\Dotenv\Dotenv;
 use Symfony\Component\HttpKernel\KernelInterface;
 use Symfony\Component\Routing\Attribute\Route;
@@ -28,6 +29,7 @@ use Tourze\BundleDependency\ResolveHelper;
 use Tourze\DoctrineResolveTargetEntityBundle\Testing\TestEntityGenerator;
 use Tourze\PHPUnitBase\TestCaseHelper;
 use Tourze\PHPUnitBase\TestHelper;
+use Tourze\PHPUnitSymfonyKernelTest\AbstractIntegrationTestCase;
 use Tourze\PHPUnitSymfonyKernelTest\BundleInferrer;
 use Tourze\PHPUnitSymfonyKernelTest\DatabaseHelper;
 use Tourze\PHPUnitSymfonyKernelTest\DoctrineTrait;
@@ -35,6 +37,8 @@ use Tourze\PHPUnitSymfonyKernelTest\EntityManagerHelper;
 use Tourze\PHPUnitSymfonyKernelTest\Exception\DoctrineSupportException;
 use Tourze\PHPUnitSymfonyKernelTest\InMemoryUserManager;
 use Tourze\PHPUnitSymfonyKernelTest\ServiceLocatorTrait;
+use Tourze\PHPUnitSymfonyKernelTest\TestEntityUserManager;
+use Tourze\PHPUnitSymfonyKernelTest\TestEntityUserProvider;
 use Tourze\PHPUnitSymfonyWebTest\Exception\WebTestClientException;
 use Tourze\UserServiceContracts\UserManagerInterface;
 
@@ -296,13 +300,106 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
         $_ENV['DATABASE_URL'] = $_SERVER['DATABASE_URL'] = DatabaseHelper::generateUniqueDatabaseUrl();
         $_ENV['TRUSTED_PROXIES'] = $_SERVER['TRUSTED_PROXIES'] = '0.0.0.0/0';
 
+        // 扫描实体中使用的接口并自动生成测试实体
+        $resolveTargetInterfaces = AbstractIntegrationTestCase::scanEntityInterfaces($entityMappings);
+
         // 使用匿名类扩展测试 Kernel，在构建容器时补充默认的 UserManagerInterface
-        return new class(environment: $options['environment'] ?? 'test', debug: $options['debug'] ?? true, projectDir: $projectDir, appendBundles: $bundles) extends Kernel {
+        return new class(
+            environment: $options['environment'] ?? 'test',
+            debug: $options['debug'] ?? true,
+            projectDir: $projectDir,
+            appendBundles: $bundles,
+            entityGenerator: $entityGenerator,
+            interfaces: $resolveTargetInterfaces
+        ) extends Kernel {
+            public function __construct(
+                string $environment,
+                bool $debug,
+                string $projectDir,
+                array $appendBundles,
+                private readonly TestEntityGenerator $entityGenerator,
+                private readonly array $interfaces,
+            ) {
+                parent::__construct($environment, $debug, $projectDir, $appendBundles);
+            }
+
             protected function build(ContainerBuilder $container): void
             {
                 parent::build($container);
 
-                $definition = new Definition(InMemoryUserManager::class);
+                // 配置 Doctrine 映射生成的实体命名空间
+                if ($container->hasExtension('doctrine')) {
+                    // 确保 test_entities 目录存在（Doctrine 要求映射目录必须存在）
+                    $testEntitiesDir = $this->getProjectDir() . '/test_entities';
+                    if (!is_dir($testEntitiesDir)) {
+                        mkdir($testEntitiesDir, 0o777, true);
+                    }
+
+                    $container->prependExtensionConfig('doctrine', [
+                        'orm' => [
+                            'mappings' => [
+                                'DoctrineResolveTargetForTest' => [
+                                    'type' => 'attribute',
+                                    'dir' => $testEntitiesDir,
+                                    'prefix' => $this->entityGenerator->getNamespace(),
+                                    'is_bundle' => false,
+                                ],
+                            ],
+                        ],
+                    ]);
+                }
+
+                // 为所有扫描到的接口生成测试实体并配置映射
+                $userEntityClass = null; // 记录 UserInterface 对应的实体类
+                $resolveTargets = [];
+                foreach ($this->interfaces as $interface) {
+                    try {
+                        // 生成测试实体
+                        $entityClass = $this->entityGenerator->generateTestEntity($interface);
+
+                        // 立即加载生成的类文件（确保可以被实例化）
+                        $classFile = $this->getProjectDir() . '/test_entities/' . basename(str_replace('\\', '/', $entityClass)) . '.php';
+                        if (file_exists($classFile)) {
+                            require_once $classFile;
+                        }
+                        // 收集 ResolveTargetEntity 映射，稍后一次性注入 doctrine 配置
+                        $resolveTargets[$interface] = $entityClass;
+
+                        // 检查是否是 UserInterface 映射
+                        if ('Symfony\Component\Security\Core\User\UserInterface' === $interface) {
+                            $userEntityClass = $entityClass;
+                        }
+                    } catch (\Exception $e) {
+                        // 记录错误但不中断测试
+                        error_log(sprintf(
+                            'Failed to generate test entity for interface %s: %s',
+                            $interface,
+                            $e->getMessage()
+                        ));
+                    }
+                }
+
+                // 以 doctrine 预置配置注入 resolve_target_entities，确保在元数据加载前生效
+                if ($container->hasExtension('doctrine') && !empty($resolveTargets)) {
+                    $container->prependExtensionConfig('doctrine', [
+                        'orm' => [
+                            'resolve_target_entities' => $resolveTargets,
+                        ],
+                    ]);
+                }
+
+                // 根据是否有 UserInterface 映射，选择合适的 UserManager
+                if (null !== $userEntityClass) {
+                    // 使用 TestEntityUserManager（支持 Doctrine 实体）
+                    $definition = new Definition(TestEntityUserManager::class, [
+                        new Reference('doctrine.orm.entity_manager'),
+                        $userEntityClass,
+                    ]);
+                } else {
+                    // 回退到 InMemoryUserManager
+                    $definition = new Definition(InMemoryUserManager::class);
+                }
+
                 $definition->setPublic(true);
                 $container->setDefinition(InMemoryUserManager::class, $definition);
 
@@ -314,6 +411,26 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
                 $id = UserLoaderInterface::class;
                 if (!$container->has($id) && !$container->hasDefinition($id) && !$container->hasAlias($id)) {
                     $container->setAlias(UserLoaderInterface::class, InMemoryUserManager::class);
+                }
+
+                // 配置 Symfony Security UserProvider（仅当检测到 UserInterface 映射时）
+                if (null !== $userEntityClass && $container->hasExtension('security')) {
+                    // 注册 TestEntityUserProvider 服务
+                    $userProviderDefinition = new Definition(TestEntityUserProvider::class, [
+                        new Reference(InMemoryUserManager::class),
+                        $userEntityClass,
+                    ]);
+                    $userProviderDefinition->setPublic(true);
+                    $container->setDefinition('test_entity_user_provider', $userProviderDefinition);
+
+                    // 在 Security 配置中声明该 provider
+                    $container->prependExtensionConfig('security', [
+                        'providers' => [
+                            'test_entity_user_provider' => [
+                                'id' => 'test_entity_user_provider',
+                            ],
+                        ],
+                    ]);
                 }
             }
         };
