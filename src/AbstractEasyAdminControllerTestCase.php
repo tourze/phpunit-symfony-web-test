@@ -603,8 +603,7 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
 
     final public function testIndexRowActionLinksShouldNotReturn500(): void
     {
-        $client = self::createClientWithDatabase();
-        $this->loginAsAdmin($client);
+        $client = $this->createAuthenticatedClient();
 
         // 访问 INDEX 页面
         $indexUrl = $this->generateAdminUrl(Action::INDEX);
