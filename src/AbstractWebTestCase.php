@@ -70,7 +70,8 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
     protected function loginAsUser(KernelBrowser $client, string $username = 'user', string $password = 'password'): UserInterface
     {
         $user = $this->findOrCreateUser($username, $password, ['ROLE_USER']);
-        $client->loginUser($user);
+        // 指定防火墙为 main，避免多防火墙环境下凭据未绑定到正确上下文
+        $client->loginUser($user, 'main');
 
         return $user;
     }
@@ -83,7 +84,8 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
     protected function loginWithRoles(KernelBrowser $client, array $roles, string $username = 'test', string $password = 'password'): UserInterface
     {
         $user = $this->findOrCreateUser($username, $password, $roles);
-        $client->loginUser($user);
+        // 指定防火墙为 main，确保角色在 /admin 等受保护路径下生效
+        $client->loginUser($user, 'main');
 
         return $user;
     }
@@ -192,7 +194,8 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
     {
         // 使用框架内置的 InMemoryUser，避免匿名类导致的序列化失败
         $user = new InMemoryUser('' !== $username ? $username : 'unknown', '', $roles);
-        $client->loginUser($user);
+        // 显式绑定到 main 防火墙，以通过 ^/admin 的访问控制
+        $client->loginUser($user, 'main');
 
         return $user;
     }
@@ -495,19 +498,12 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     final protected static function createClient(array $options = [], array $server = []): KernelBrowser
     {
-        if (static::$booted) {
-            $client = self::getClient();
-            if (null !== $client) {
-                if (!$client instanceof KernelBrowser) {
-                    throw new WebTestClientException('现有客户端不是 KernelBrowser 类型');
-                }
-
-                return $client;
-            }
-            // 如果客户端为null，继续创建新的客户端而不是抛异常
+        // 如果内核尚未启动，先启动内核
+        if (!static::$booted) {
+            $kernel = static::bootKernel($options);
+        } else {
+            $kernel = static::$kernel;
         }
-
-        $kernel = static::bootKernel($options);
 
         try {
             $client = self::getContainer()->get('test.client');
@@ -522,6 +518,9 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
         }
 
         $client->setServerParameters($server);
+
+        // 注册客户端到静态变量，确保后续 getClient() 调用能够获取到客户端
+        self::getClient($client);
 
         return $client;
     }
