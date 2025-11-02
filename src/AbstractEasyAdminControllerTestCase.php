@@ -20,6 +20,7 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Routing\Exception\MissingMandatoryParametersException;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
+use Symfony\Component\Security\Core\User\InMemoryUser;
 use Tourze\PHPUnitBase\TestCaseHelper;
 
 /**
@@ -150,7 +151,7 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
         $client->catchExceptions(false);
 
         // 直接使用内存管理员用户登录，避免 provider 重载导致的角色丢失
-        $client->loginUser(new \Symfony\Component\Security\Core\User\InMemoryUser('admin', 'password', ['ROLE_ADMIN']), 'main');
+        $client->loginUser(new InMemoryUser('admin', 'password', ['ROLE_ADMIN']), 'main');
 
         return $client;
     }
