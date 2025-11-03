@@ -19,6 +19,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Component\DomCrawler\Crawler;
 use Symfony\Component\Routing\Exception\MissingMandatoryParametersException;
+use Symfony\Component\Routing\RouterInterface;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 use Symfony\Component\Security\Core\User\InMemoryUser;
 use Tourze\PHPUnitBase\TestCaseHelper;
@@ -28,6 +29,38 @@ use Tourze\PHPUnitBase\TestCaseHelper;
  */
 abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
 {
+    /**
+     * 确保 EasyAdmin Dashboard 路由缓存在测试运行前已生成
+     *
+     * 这是必需的，因为在完整测试套件运行时，如果这是第一个执行的 EasyAdmin Controller 测试，
+     * Dashboard 路由缓存文件可能尚不存在，导致 AdminUrlGenerator 无法解析 Dashboard。
+     */
+    final protected function onSetUp(): void
+    {
+        parent::onSetUp();
+
+        // 获取缓存路径参数
+        $container = self::getContainer();
+        $buildDir = $container->getParameter('kernel.build_dir');
+        $cacheDir = $container->getParameter('kernel.cache_dir');
+
+        // 确保参数类型正确
+        self::assertIsString($buildDir);
+        self::assertIsString($cacheDir);
+
+        // Dashboard 路由缓存文件路径
+        $cacheFile = $buildDir . '/easyadmin/routes-dashboard.php';
+
+        // 如果缓存文件不存在，主动触发缓存预热
+        if (!file_exists($cacheFile)) {
+            $router = self::getService(RouterInterface::class);
+            // @phpstan-ignore-next-line method.deprecatedClass (测试环境中使用已废弃的 CacheWarmer 是合理的临时方案)
+            $warmer = new CacheWarmer($router);
+            // @phpstan-ignore-next-line method.deprecatedClass
+            $warmer->warmUp($cacheDir, $buildDir);
+        }
+    }
+
     /**
      * 读取容器中的真实服务
      */
