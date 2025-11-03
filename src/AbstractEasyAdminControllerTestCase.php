@@ -54,9 +54,7 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
         // 如果缓存文件不存在，主动触发缓存预热
         if (!file_exists($cacheFile)) {
             $router = self::getService(RouterInterface::class);
-            // @phpstan-ignore-next-line method.deprecatedClass (测试环境中使用已废弃的 CacheWarmer 是合理的临时方案)
             $warmer = new CacheWarmer($router);
-            // @phpstan-ignore-next-line method.deprecatedClass
             $warmer->warmUp($cacheDir, $buildDir);
         }
     }
