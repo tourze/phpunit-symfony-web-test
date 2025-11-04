@@ -377,7 +377,7 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
                         error_log(sprintf(
                             'Failed to generate test entity for interface %s: %s',
                             $interface,
-                            $e->getMessage()
+                            $e,
                         ));
                     }
                 }
