@@ -57,6 +57,18 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
             $warmer = new CacheWarmer($router);
             $warmer->warmUp($cacheDir, $buildDir);
         }
+
+        // 允许子类在 EasyAdmin 缓存预热之后，做额外的初始化
+        $this->afterEasyAdminSetUp();
+    }
+
+    /**
+     * 子类可覆盖此方法以添加额外的 setUp 逻辑
+     * 注意：此钩子在 EasyAdmin Dashboard 路由缓存预热之后调用
+     */
+    protected function afterEasyAdminSetUp(): void
+    {
+        // 默认不做任何操作
     }
 
     /**
