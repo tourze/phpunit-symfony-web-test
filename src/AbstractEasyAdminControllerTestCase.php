@@ -403,7 +403,7 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
         $this->assertResponseIsSuccessful();
 
         $theadNodes = $crawler->filter('table thead');
-        self::assertGreaterThan(0, $theadNodes->count(), 'No table headers found on the page.');
+        self::assertGreaterThan(0, $theadNodes->count(), 'No table headers found on the page. 你是否忘记实现填充数据类？');
 
         $headerText = $theadNodes->last()->text();
         self::assertStringContainsString($expectedHeader, $headerText);
