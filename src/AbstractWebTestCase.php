@@ -59,9 +59,11 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
      */
     protected function loginAsAdmin(KernelBrowser $client, string $username = 'admin', string $password = 'password'): UserInterface
     {
-        // 为兼容 testing framework 的内存用户提供者，这里固定使用 `admin`
-        // 避免由于 provider 仅预置了 admin 用户而在请求时被刷新导致权限丢失
-        return $this->loginWithMemoryUser($client, 'admin', ['ROLE_ADMIN']);
+        $admin = $this->findOrCreateUser($username, $password, ['ROLE_ADMIN']);
+        // 显式绑定到 main 防火墙，以通过 ^/admin 的访问控制
+        $client->loginUser($admin, 'main');
+
+        return $admin;
     }
 
     /**
@@ -183,21 +185,6 @@ abstract class AbstractWebTestCase extends BaseWebTestCase
         }
 
         return $this->entityManagerHelper;
-    }
-
-    /**
-     * 使用内存用户登录（回退方案）
-     *
-     * @param array<string> $roles
-     */
-    private function loginWithMemoryUser(KernelBrowser $client, string $username, array $roles): UserInterface
-    {
-        // 使用框架内置的 InMemoryUser，避免匿名类导致的序列化失败
-        $user = new InMemoryUser('' !== $username ? $username : 'unknown', '', $roles);
-        // 显式绑定到 main 防火墙，以通过 ^/admin 的访问控制
-        $client->loginUser($user, 'main');
-
-        return $user;
     }
 
     /**
