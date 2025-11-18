@@ -706,4 +706,12 @@ abstract class AbstractEasyAdminControllerTestCase extends AbstractWebTestCase
             $this->assertLessThan(500, $status, sprintf('链接 %s 最终返回了 %d', $href, $status));
         }
     }
+
+    #[Test]
+    final public function testGetEntityFqcnReturnsStringType(): void
+    {
+        $result = $this->getControllerService()::getEntityFqcn();
+        $this->assertIsString($result);
+        $this->assertNotEmpty($result);
+    }
 }
